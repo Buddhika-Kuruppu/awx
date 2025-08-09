@@ -1,0 +1,31 @@
+---
+# Common variables for LAMP servers group
+# Database configuration
+db_name: webapp_db
+db_user: webapp_user
+
+# Default passwords (should be overridden in host_vars or AWX with vault)
+vault_mysql_root_password: changeme
+vault_db_password: changeme
+
+# Common PHP packages
+php_packages_debian:
+  - php
+  - php-mysql
+  - php-cli
+  - php-curl
+  - php-gd
+  - php-mbstring
+  - php-xml
+  - php-zip
+  - libapache2-mod-php
+
+php_packages_redhat:
+  - php
+  - php-mysql
+  - php-cli
+  - php-curl
+  - php-gd
+  - php-mbstring
+  - php-xml
+  - php-zip

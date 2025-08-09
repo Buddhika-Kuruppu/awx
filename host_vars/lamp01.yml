@@ -1,0 +1,13 @@
+---
+# Host specific variables for lamp01
+vault_mysql_root_password: !vault |
+          $ANSIBLE_VAULT;1.1;AES256
+          # Replace with actual encrypted password
+          
+vault_db_password: !vault |
+          $ANSIBLE_VAULT;1.1;AES256
+          # Replace with actual encrypted password
+
+# Database configuration
+db_name: webapp_db
+db_user: webapp_user

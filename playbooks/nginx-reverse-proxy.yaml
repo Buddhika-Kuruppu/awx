@@ -1,0 +1,203 @@
+---
+- name: Deploy Nginx Reverse Proxy on Ubuntu
+  hosts: "{{ target_hosts | default('webservers') }}"
+  become: yes
+  vars:
+    # Default variables - can be overridden in AWX
+    nginx_user: www-data
+    nginx_worker_processes: auto
+    nginx_worker_connections: 1024
+    nginx_keepalive_timeout: 65
+    nginx_client_max_body_size: 64m
+    
+    # Reverse proxy configuration
+    upstream_servers:
+      - { name: "app1", server: "127.0.0.1:3000", weight: 1 }
+      - { name: "app2", server: "127.0.0.1:3001", weight: 1 }
+    
+    # Virtual host configuration
+    server_name: "{{ domain_name | default('example.com') }}"
+    listen_port: 80
+    ssl_enabled: "{{ enable_ssl | default(false) }}"
+    ssl_cert_path: "/etc/ssl/certs/{{ server_name }}.crt"
+    ssl_key_path: "/etc/ssl/private/{{ server_name }}.key"
+    
+    # Proxy settings
+    proxy_connect_timeout: 30s
+    proxy_send_timeout: 30s
+    proxy_read_timeout: 30s
+    proxy_buffer_size: 64k
+    proxy_buffers: 8 64k
+
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      tags: ['setup']
+
+    - name: Install nginx and required packages
+      apt:
+        name:
+          - nginx
+          - nginx-extras
+          - openssl
+        state: present
+      tags: ['setup']
+
+    - name: Create nginx directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      loop:
+        - /etc/nginx/sites-available
+        - /etc/nginx/sites-enabled
+        - /etc/nginx/conf.d
+        - /var/log/nginx
+        - /etc/ssl/private
+      tags: ['setup']
+
+    - name: Remove default nginx site
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/nginx/sites-enabled/default
+        - /etc/nginx/sites-available/default
+      notify: restart nginx
+      tags: ['config']
+
+    - name: Generate nginx main configuration
+      template:
+        src: nginx.conf.j2
+        dest: /etc/nginx/nginx.conf
+        owner: root
+        group: root
+        mode: '0644'
+        backup: yes
+      notify: restart nginx
+      tags: ['config']
+
+    - name: Generate upstream configuration
+      template:
+        src: upstream.conf.j2
+        dest: /etc/nginx/conf.d/upstream.conf
+        owner: root
+        group: root
+        mode: '0644'
+        backup: yes
+      notify: reload nginx
+      tags: ['config']
+
+    - name: Generate SSL certificate (self-signed) if SSL enabled and cert doesn't exist
+      block:
+        - name: Check if SSL certificate exists
+          stat:
+            path: "{{ ssl_cert_path }}"
+          register: ssl_cert_check
+
+        - name: Generate self-signed SSL certificate
+          command: >
+            openssl req -x509 -nodes -days 365 -newkey rsa:2048
+            -keyout {{ ssl_key_path }}
+            -out {{ ssl_cert_path }}
+            -subj "/C=US/ST=State/L=City/O=Organization/CN={{ server_name }}"
+          when: not ssl_cert_check.stat.exists
+
+        - name: Set SSL certificate permissions
+          file:
+            path: "{{ item.path }}"
+            owner: root
+            group: "{{ item.group }}"
+            mode: "{{ item.mode }}"
+          loop:
+            - { path: "{{ ssl_cert_path }}", group: "root", mode: "0644" }
+            - { path: "{{ ssl_key_path }}", group: "ssl-cert", mode: "0640" }
+      when: ssl_enabled | bool
+      tags: ['ssl']
+
+    - name: Generate reverse proxy virtual host configuration
+      template:
+        src: reverse-proxy.conf.j2
+        dest: "/etc/nginx/sites-available/{{ server_name }}"
+        owner: root
+        group: root
+        mode: '0644'
+        backup: yes
+      notify: reload nginx
+      tags: ['config']
+
+    - name: Enable reverse proxy site
+      file:
+        src: "/etc/nginx/sites-available/{{ server_name }}"
+        dest: "/etc/nginx/sites-enabled/{{ server_name }}"
+        state: link
+      notify: reload nginx
+      tags: ['config']
+
+    - name: Test nginx configuration
+      command: nginx -t
+      register: nginx_test
+      changed_when: false
+      failed_when: nginx_test.rc != 0
+      tags: ['config', 'test']
+
+    - name: Start and enable nginx service
+      systemd:
+        name: nginx
+        state: started
+        enabled: yes
+        daemon_reload: yes
+      tags: ['service']
+
+    - name: Configure UFW firewall rules
+      ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+      loop:
+        - "80"
+        - "443"
+      when: configure_firewall | default(true)
+      tags: ['firewall']
+
+    - name: Create nginx log rotation configuration
+      copy:
+        content: |
+          /var/log/nginx/*.log {
+              daily
+              missingok
+              rotate 52
+              compress
+              delaycompress
+              notifempty
+              create 0644 www-data adm
+              sharedscripts
+              prerotate
+                  if [ -d /etc/logrotate.d/httpd-prerotate ]; then \
+                      run-parts /etc/logrotate.d/httpd-prerotate; \
+                  fi \
+              endscript
+              postrotate
+                  invoke-rc.d nginx rotate >/dev/null 2>&1
+              endscript
+          }
+        dest: /etc/logrotate.d/nginx
+        owner: root
+        group: root
+        mode: '0644'
+      tags: ['logging']
+
+  handlers:
+    - name: restart nginx
+      systemd:
+        name: nginx
+        state: restarted
+
+    - name: reload nginx
+      systemd:
+        name: nginx
+        state: reloaded

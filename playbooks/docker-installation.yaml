@@ -1,0 +1,112 @@
+---
+- name: Install Docker on Ubuntu
+  hosts: all
+  become: yes
+  gather_facts: yes
+  
+  vars:
+    # Users to add to docker group (optional)
+    docker_users:
+      - "{{ ansible_user }}"
+    
+    # Docker packages to install
+    docker_packages:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
+
+  tasks:
+    - name: Check if running on Ubuntu
+      fail:
+        msg: "This playbook is designed for Ubuntu systems only"
+      when: ansible_distribution != "Ubuntu"
+
+    - name: Update apt package cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install required packages for Docker repository
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+        state: present
+
+    - name: Create directory for Docker GPG key
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: Add Docker's official GPG key
+      shell: |
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+        chmod a+r /etc/apt/keyrings/docker.gpg
+      args:
+        creates: /etc/apt/keyrings/docker.gpg
+
+    - name: Add Docker repository
+      shell: |
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+      args:
+        creates: /etc/apt/sources.list.d/docker.list
+
+    - name: Update apt package cache after adding Docker repository
+      apt:
+        update_cache: yes
+
+    - name: Install Docker packages
+      apt:
+        name: "{{ docker_packages }}"
+        state: present
+
+    - name: Start and enable Docker service
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Add users to docker group
+      user:
+        name: "{{ item }}"
+        groups: docker
+        append: yes
+      loop: "{{ docker_users }}"
+      when: docker_users is defined and docker_users | length > 0
+
+    - name: Verify Docker installation
+      command: docker --version
+      register: docker_version
+      changed_when: false
+
+    - name: Display Docker version
+      debug:
+        msg: "Docker installed successfully: {{ docker_version.stdout }}"
+
+    - name: Test Docker with hello-world (optional)
+      docker_container:
+        name: hello-world-test
+        image: hello-world
+        state: started
+        auto_remove: yes
+      register: hello_world_result
+      ignore_errors: yes
+      tags: test
+
+    - name: Display hello-world test result
+      debug:
+        msg: "Docker test completed successfully"
+      when: hello_world_result is succeeded
+      tags: test
+
+  handlers:
+    - name: restart docker
+      systemd:
+        name: docker
+        state: restarted
