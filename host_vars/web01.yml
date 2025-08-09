@@ -1,0 +1,10 @@
+---
+# Host specific variables for web01
+server_name: web01.example.com
+enable_ssl: true
+configure_firewall: true
+
+# Nginx upstream configuration
+upstream_servers:
+  - { name: "app1", server: "127.0.0.1:3000", weight: 2 }
+  - { name: "app2", server: "127.0.0.1:3001", weight: 1 }

@@ -1,0 +1,31 @@
+---
+# Common variables for all hosts
+ansible_user: ubuntu
+ansible_become: yes
+ansible_become_method: sudo
+
+# Common packages for all systems
+common_packages_debian:
+  - apt-transport-https
+  - ca-certificates
+  - curl
+  - gnupg
+  - lsb-release
+  - python3-pip
+  - unzip
+  - wget
+
+common_packages_redhat:
+  - curl
+  - gnupg2
+  - python3-pip
+  - unzip
+  - wget
+  - yum-utils
+
+# Timezone configuration
+timezone: "UTC"
+
+# SSH configuration
+ssh_port: 22
+ssh_allow_password_auth: false

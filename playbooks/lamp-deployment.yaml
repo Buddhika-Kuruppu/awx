@@ -1,0 +1,188 @@
+# lamp-deployment.yml
+---
+- name: Deploy LAMP Stack
+  hosts: lamp_servers
+  become: yes
+  vars:
+    mysql_root_password: "{{ vault_mysql_root_password }}"
+    db_name: "webapp_db"
+    db_user: "webapp_user"
+    db_password: "{{ vault_db_password }}"
+
+  tasks:
+    - name: Update package cache (Ubuntu/Debian)
+      apt:
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Update package cache (CentOS/RHEL)
+      yum:
+        update_cache: yes
+      when: ansible_os_family == "RedHat"
+
+    # Apache Installation
+    - name: Install Apache (Ubuntu/Debian)
+      apt:
+        name: apache2
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Install Apache (CentOS/RHEL)
+      yum:
+        name: httpd
+        state: present
+      when: ansible_os_family == "RedHat"
+
+    - name: Start and enable Apache (Ubuntu/Debian)
+      systemd:
+        name: apache2
+        state: started
+        enabled: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Start and enable Apache (CentOS/RHEL)
+      systemd:
+        name: httpd
+        state: started
+        enabled: yes
+      when: ansible_os_family == "RedHat"
+
+    # MySQL Installation
+    - name: Install MySQL (Ubuntu/Debian)
+      apt:
+        name:
+          - mysql-server
+          - mysql-client
+          - python3-pymysql
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Install MySQL (CentOS/RHEL)
+      yum:
+        name:
+          - mysql-server
+          - mysql
+          - python3-PyMySQL
+        state: present
+      when: ansible_os_family == "RedHat"
+
+    - name: Start and enable MySQL
+      systemd:
+        name: mysql
+        state: started
+        enabled: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Start and enable MySQL (CentOS/RHEL)
+      systemd:
+        name: mysqld
+        state: started
+        enabled: yes
+      when: ansible_os_family == "RedHat"
+
+    - name: Set MySQL root password
+      mysql_user:
+        name: root
+        password: "{{ mysql_root_password }}"
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        login_user: root
+        login_password: ""
+        state: present
+      ignore_errors: yes
+
+    - name: Create application database
+      mysql_db:
+        name: "{{ db_name }}"
+        state: present
+        login_user: root
+        login_password: "{{ mysql_root_password }}"
+
+    - name: Create database user
+      mysql_user:
+        name: "{{ db_user }}"
+        password: "{{ db_password }}"
+        priv: "{{ db_name }}.*:ALL"
+        state: present
+        login_user: root
+        login_password: "{{ mysql_root_password }}"
+
+    # PHP Installation
+    - name: Install PHP (Ubuntu/Debian)
+      apt:
+        name:
+          - php
+          - php-mysql
+          - php-cli
+          - php-curl
+          - php-gd
+          - php-mbstring
+          - php-xml
+          - php-zip
+          - libapache2-mod-php
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Install PHP (CentOS/RHEL)
+      yum:
+        name:
+          - php
+          - php-mysql
+          - php-cli
+          - php-curl
+          - php-gd
+          - php-mbstring
+          - php-xml
+          - php-zip
+        state: present
+      when: ansible_os_family == "RedHat"
+
+    # Configuration
+    - name: Create test PHP file
+      copy:
+        content: |
+          <?php
+          phpinfo();
+          ?>
+        dest: /var/www/html/info.php
+        owner: www-data
+        group: www-data
+        mode: '0644'
+      when: ansible_os_family == "Debian"
+
+    - name: Create test PHP file (CentOS/RHEL)
+      copy:
+        content: |
+          <?php
+          phpinfo();
+          ?>
+        dest: /var/www/html/info.php
+        owner: apache
+        group: apache
+        mode: '0644'
+      when: ansible_os_family == "RedHat"
+
+    - name: Restart Apache
+      systemd:
+        name: "{{ 'apache2' if ansible_os_family == 'Debian' else 'httpd' }}"
+        state: restarted
+
+    # Firewall Configuration
+    - name: Configure firewall (Ubuntu/Debian)
+      ufw:
+        rule: allow
+        port: "{{ item }}"
+      loop:
+        - "80"
+        - "443"
+      when: ansible_os_family == "Debian"
+
+    - name: Configure firewall (CentOS/RHEL)
+      firewalld:
+        service: "{{ item }}"
+        permanent: yes
+        state: enabled
+        immediate: yes
+      loop:
+        - http
+        - https
+      when: ansible_os_family == "RedHat"

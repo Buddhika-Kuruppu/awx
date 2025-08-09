@@ -1,0 +1,23 @@
+---
+# Common variables for webservers group
+nginx_user: www-data
+nginx_worker_processes: auto
+nginx_worker_connections: 1024
+nginx_keepalive_timeout: 65
+nginx_client_max_body_size: 64m
+
+# Default proxy settings
+proxy_connect_timeout: 30s
+proxy_send_timeout: 30s
+proxy_read_timeout: 30s
+proxy_buffer_size: 64k
+proxy_buffers: 8 64k
+
+# Default SSL settings
+listen_port: 80
+ssl_enabled: false
+configure_firewall: true
+
+# Default upstream configuration
+upstream_servers:
+  - { name: "app1", server: "127.0.0.1:3000", weight: 1 }
