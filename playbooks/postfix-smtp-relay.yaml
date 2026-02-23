@@ -1,0 +1,133 @@
+---
+- name: Configure Postfix SMTP Relay on Ubuntu 24.04
+  hosts: all
+  become: yes
+  gather_facts: yes
+
+  vars:
+    # SMTP relay host (e.g., smtp.gmail.com, smtp.sendgrid.net, your-relay.example.com)
+    smtp_relay_host: "smtp.example.com"
+    smtp_relay_port: 587
+
+    # SMTP relay credentials
+    smtp_relay_username: "your-smtp-username"
+    smtp_relay_password: "your-smtp-password"
+
+    # Sender configuration
+    smtp_sender_domain: "example.com"
+
+    # Optional: rewrite all sender addresses to relay username (set to true to enable)
+    smtp_sender_canonical_maps: false
+
+    # TLS settings
+    smtp_tls_security_level: "encrypt"
+
+  tasks:
+    - name: Check if running on Ubuntu 24.04
+      fail:
+        msg: "This playbook is designed for Ubuntu 24.04 (Noble) only"
+      when: >
+        ansible_distribution != "Ubuntu" or
+        ansible_distribution_version is not version('24.04', '>=')
+
+    - name: Update apt package cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Set Postfix options for non-interactive install
+      debconf:
+        name: postfix
+        question: "{{ item.question }}"
+        value: "{{ item.value }}"
+        vtype: "{{ item.vtype }}"
+      loop:
+        - { question: "postfix/main_mailer_type", value: "Internet Site", vtype: "select" }
+        - { question: "postfix/mailname", value: "{{ smtp_sender_domain }}", vtype: "string" }
+
+    - name: Install Postfix and dependencies
+      apt:
+        name:
+          - postfix
+          - libsasl2-modules
+          - mailutils
+        state: present
+
+    - name: Deploy Postfix main.cf
+      template:
+        src: postfix-main.cf.j2
+        dest: /etc/postfix/main.cf
+        owner: root
+        group: root
+        mode: '0644'
+      notify: reload postfix
+
+    - name: Deploy SASL password file
+      template:
+        src: postfix-sasl-passwd.j2
+        dest: /etc/postfix/sasl_passwd
+        owner: root
+        group: root
+        mode: '0600'
+      no_log: true
+      notify:
+        - hash sasl_passwd
+        - reload postfix
+
+    - name: Deploy sender canonical map
+      template:
+        src: postfix-sender-canonical.j2
+        dest: /etc/postfix/sender_canonical
+        owner: root
+        group: root
+        mode: '0644'
+      when: smtp_sender_canonical_maps | bool
+      notify:
+        - hash sender_canonical
+        - reload postfix
+
+    - name: Start and enable Postfix service
+      systemd:
+        name: postfix
+        state: started
+        enabled: yes
+
+    - name: Flush handlers to apply all changes
+      meta: flush_handlers
+
+    - name: Verify Postfix is running
+      command: postfix status
+      register: postfix_status
+      changed_when: false
+
+    - name: Display Postfix status
+      debug:
+        msg: "{{ postfix_status.stdout }}"
+
+    - name: Send test email
+      command: >
+        sendmail -v -f "test@{{ smtp_sender_domain }}" {{ smtp_relay_username }}
+      args:
+        stdin: "Subject: Postfix SMTP Relay Test\n\nThis is a test email from Ansible.\n"
+      register: test_email
+      changed_when: false
+      ignore_errors: yes
+      tags: test
+
+    - name: Display test email result
+      debug:
+        msg: "Test email sent successfully"
+      when: test_email is succeeded
+      tags: test
+
+  handlers:
+    - name: hash sasl_passwd
+      command: postmap /etc/postfix/sasl_passwd
+
+    - name: hash sender_canonical
+      command: postmap /etc/postfix/sender_canonical
+
+    - name: reload postfix
+      systemd:
+        name: postfix
+        state: reloaded

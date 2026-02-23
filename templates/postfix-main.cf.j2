@@ -1,0 +1,43 @@
+# Postfix main configuration - managed by Ansible
+
+# General
+smtpd_banner = $myhostname ESMTP $mail_name
+biff = no
+append_dot_mydomain = no
+readme_directory = no
+
+# TLS parameters (incoming)
+smtpd_tls_cert_file = /etc/ssl/certs/ssl-cert-snakeoil.pem
+smtpd_tls_key_file = /etc/ssl/private/ssl-cert-snakeoil.key
+smtpd_tls_security_level = may
+
+# Relay host
+relayhost = [{{ smtp_relay_host }}]:{{ smtp_relay_port }}
+
+# SASL authentication
+smtp_sasl_auth_enable = yes
+smtp_sasl_password_maps = hash:/etc/postfix/sasl_passwd
+smtp_sasl_security_options = noanonymous
+smtp_sasl_tls_security_options = noanonymous
+
+# TLS (outgoing)
+smtp_tls_security_level = {{ smtp_tls_security_level }}
+smtp_tls_CAfile = /etc/ssl/certs/ca-certificates.crt
+smtp_tls_loglevel = 1
+
+# Origin / addressing
+myorigin = {{ smtp_sender_domain }}
+myhostname = {{ ansible_fqdn }}
+mydestination = localhost
+mynetworks = 127.0.0.0/8 [::ffff:127.0.0.0]/104 [::1]/128
+inet_interfaces = loopback-only
+inet_protocols = all
+
+{% if smtp_sender_canonical_maps | default('') != '' %}
+# Sender canonical rewrite
+sender_canonical_maps = regexp:/etc/postfix/sender_canonical
+{% endif %}
+
+# Queue / delivery
+mailbox_size_limit = 0
+recipient_delimiter = +
